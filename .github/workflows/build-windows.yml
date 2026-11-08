@@ -2,14 +2,14 @@
 # Sigue docs/BUILDING.md (Windows + Git Bash) en un runner de GitHub.
 # Los pasos con TODO son suposiciones: corregir con los logs de cada ejecucion.
 name: build-nx-on-orbis-windows
-
+ 
 on:
   workflow_dispatch:
-
+ 
 defaults:
   run:
     shell: bash   # Git Bash en el runner de Windows
-
+ 
 jobs:
   build:
     runs-on: windows-2022
@@ -18,7 +18,10 @@ jobs:
       HT: C:/hosttools           # sustituye a C:/Users/alejo/soh-ps4/tools
     steps:
       - uses: actions/checkout@v4
-
+ 
+      - name: Version del workflow
+        run: echo "WORKFLOW VERSION v3 - sdk fix + sendfile patch"
+ 
       # ---------- 1. Herramientas del host ----------
       - name: LLVM 18.1.8
         run: |
@@ -27,7 +30,7 @@ jobs:
           tar xf llvm.tar.xz
           mv clang+llvm-18.1.8-x86_64-pc-windows-msvc llvm
           ./llvm/bin/clang.exe --version
-
+ 
       - name: CMake, Ninja y glslang
         run: |
           mkdir -p "$HT/ninja" "$HT/glslang" "$HT/cmake-4.4.3-windows-x86_64"
@@ -36,25 +39,25 @@ jobs:
           cp "$(command -v ninja)" "$HT/ninja/" || true
           # TODO: bajar glslang (KhronosGroup/glslang, release windows) a $HT/glslang/bin
           #       y copiar glslangValidator.exe a tools/bin/ del repo
-
+ 
       - name: llvm-mingw (host compiler de FFmpeg)
         run: |
           cd "$HT"
           # TODO: URL exacta de la release 20260922 ucrt x86_64 de mstorsjo/llvm-mingw
           echo "completar"
-
+ 
       - name: MSYS2 make y perl
         run: |
           # El runner ya trae MSYS2 en C:/msys64.
           # TODO: instalar make y perl con pacman y enlazarlos a tools/usr y tools/msys-perl
           /c/msys64/usr/bin/pacman.exe -S --noconfirm make perl || true
-
+ 
       - name: OpenOrbis PS4 Toolchain 0.5.4
         run: |
           mkdir -p "$HT/OpenOrbis/OpenOrbis"
           # TODO: URL del asset Windows de la release 0.5.4 de OpenOrbis-PS4-Toolchain,
           #       dejarlo en $HT/OpenOrbis/OpenOrbis/PS4Toolchain
-
+ 
       # ---------- 2. SDK ----------
       - name: orbis-sdk-v1
         env:
@@ -79,7 +82,7 @@ jobs:
           #    a sdk-dl/orbis-sdk-v1/sdk/bin/windows/
           #  - en orbis-compat/cmake/ps4-openorbis.cmake agregar:
           #    elseif(CMAKE_HOST_WIN32) set(OO_PS4_BINDIR "${OO_PS4_TOOLCHAIN}/bin/windows")
-
+ 
       # ---------- 3. Rutas del autor -> rutas del runner ----------
       - name: Reemplazar rutas
         run: |
@@ -92,7 +95,7 @@ jobs:
               -e "s#/c/Users/alejo/eden-ps4#$WS_GIT#g" \
               -e "s#C:/Users/alejo/soh-ps4/tools#C:/hosttools#g" \
               -e "s#/c/Users/alejo/soh-ps4/tools#/c/hosttools#g"
-
+ 
       # ---------- 4. libc++ 18 (cacheado) ----------
       - name: Cache libcxx18
         id: cache-libcxx
@@ -123,7 +126,7 @@ jobs:
           cmake --build build-ps4
           cmake --install build-ps4
           echo '#undef __FreeBSD__' >> "$GITHUB_WORKSPACE/libcxx18/include/c++/v1/__config_site"
-
+ 
       # ---------- 5. OpenSSL y FFmpeg (cacheado) ----------
       - name: Cache prefix
         id: cache-prefix
@@ -159,7 +162,7 @@ jobs:
             --enable-decoder='h264,vp8,vp9' --enable-filter='yadif,scale' --enable-pic \
             --enable-pthreads --disable-shared --enable-static
           make -j"$(nproc)" && make install
-
+ 
       # ---------- 6. Eden y paquete ----------
       - name: Bajar Eden y configurar
         run: |
@@ -179,3 +182,4 @@ jobs:
             out-eden/*.pkg
             elf/*
           if-no-files-found: warn
+ 
