@@ -1,0 +1,169 @@
+# Guardar como .github/workflows/build-windows.yml
+# Sigue docs/BUILDING.md (Windows + Git Bash) en un runner de GitHub.
+# Los pasos con TODO son suposiciones: corregir con los logs de cada ejecucion.
+name: build-nx-on-orbis-windows
+
+on:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash   # Git Bash en el runner de Windows
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 350
+    env:
+      HT: C:/hosttools           # sustituye a C:/Users/alejo/soh-ps4/tools
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- 1. Herramientas del host ----------
+      - name: LLVM 18.1.8
+        run: |
+          mkdir -p "$HT" && cd "$HT"
+          curl -L -o llvm.tar.xz "https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-pc-windows-msvc.tar.xz"
+          tar xf llvm.tar.xz
+          mv clang+llvm-18.1.8-x86_64-pc-windows-msvc llvm
+          ./llvm/bin/clang.exe --version
+
+      - name: CMake, Ninja y glslang
+        run: |
+          mkdir -p "$HT/ninja" "$HT/glslang" "$HT/cmake-4.4.3-windows-x86_64"
+          choco install ninja -y
+          cp -r "$(dirname "$(command -v cmake)")" "$HT/cmake-4.4.3-windows-x86_64/bin"
+          cp "$(command -v ninja)" "$HT/ninja/" || true
+          # TODO: bajar glslang (KhronosGroup/glslang, release windows) a $HT/glslang/bin
+          #       y copiar glslangValidator.exe a tools/bin/ del repo
+
+      - name: llvm-mingw (host compiler de FFmpeg)
+        run: |
+          cd "$HT"
+          # TODO: URL exacta de la release 20260922 ucrt x86_64 de mstorsjo/llvm-mingw
+          echo "completar"
+
+      - name: MSYS2 make y perl
+        run: |
+          # El runner ya trae MSYS2 en C:/msys64.
+          # TODO: instalar make y perl con pacman y enlazarlos a tools/usr y tools/msys-perl
+          /c/msys64/usr/bin/pacman.exe -S --noconfirm make perl || true
+
+      - name: OpenOrbis PS4 Toolchain 0.5.4
+        run: |
+          mkdir -p "$HT/OpenOrbis/OpenOrbis"
+          # TODO: URL del asset Windows de la release 0.5.4 de OpenOrbis-PS4-Toolchain,
+          #       dejarlo en $HT/OpenOrbis/OpenOrbis/PS4Toolchain
+
+      # ---------- 2. SDK ----------
+      - name: orbis-sdk-v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p sdk-dl/orbis-sdk-v1
+          gh release download orbis-sdk-v1 --repo orbis-ports/orbis-porting-kit --dir sdk-dl
+          ls -la sdk-dl
+          # TODO: descomprimir en sdk-dl/orbis-sdk-v1/
+          # TODO: copiar create-fself.exe, create-gp4.exe, PkgTool.Core.exe y DLLs de OpenOrbis
+          #       a sdk-dl/orbis-sdk-v1/sdk/bin/windows/
+          # TODO: en orbis-compat/cmake/ps4-openorbis.cmake agregar:
+          #   elseif(CMAKE_HOST_WIN32) set(OO_PS4_BINDIR "${OO_PS4_TOOLCHAIN}/bin/windows")
+
+      # ---------- 3. Rutas del autor -> rutas del runner ----------
+      - name: Reemplazar rutas
+        run: |
+          WS_WIN="C:/a/$(basename "$GITHUB_WORKSPACE")/$(basename "$GITHUB_WORKSPACE")"
+          WS_WIN="$(cygpath -m "$GITHUB_WORKSPACE")"
+          WS_GIT="$(cygpath -u "$GITHUB_WORKSPACE")"
+          grep -rlE "(C:|/c)/Users/alejo/(eden-ps4|soh-ps4/tools)" --include=*.sh --include=*.cmake . \
+            | xargs -r sed -i \
+              -e "s#C:/Users/alejo/eden-ps4#$WS_WIN#g" \
+              -e "s#/c/Users/alejo/eden-ps4#$WS_GIT#g" \
+              -e "s#C:/Users/alejo/soh-ps4/tools#C:/hosttools#g" \
+              -e "s#/c/Users/alejo/soh-ps4/tools#/c/hosttools#g"
+
+      # ---------- 4. libc++ 18 (cacheado) ----------
+      - name: Cache libcxx18
+        id: cache-libcxx
+        uses: actions/cache@v4
+        with:
+          path: libcxx18
+          key: libcxx18-win-${{ hashFiles('toolchain/runtimes-ps4.cmake') }}
+      - name: Compilar libc++ 18
+        if: steps.cache-libcxx.outputs.cache-hit != 'true'
+        run: |
+          export PATH="$HT/llvm/bin:$HT/cmake-4.4.3-windows-x86_64/bin:$HT/ninja:$PATH"
+          mkdir -p deps && cd deps
+          git clone --depth 1 --branch llvmorg-18.1.8 --filter=blob:none --sparse https://github.com/llvm/llvm-project.git
+          cd llvm-project
+          git sparse-checkout set runtimes libcxx libcxxabi libunwind cmake llvm/cmake
+          grep -n "sendfile" libcxx/src/filesystem/operations.cpp | head
+          # TODO: agregar '&& !defined(__ORBIS__)' a la condicion de sendfile (~linea 40)
+          cd runtimes
+          cmake -S . -B build-ps4 -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/toolchain/runtimes-ps4.cmake" \
+            -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
+            -DLIBCXX_ENABLE_SHARED=OFF -DLIBCXXABI_ENABLE_SHARED=OFF \
+            -DLIBCXX_HAS_MUSL_LIBC=ON -DLIBCXX_CXX_ABI=libcxxabi \
+            -DLIBCXX_ENABLE_NEW_DELETE_DEFINITIONS=OFF -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
+            -DLIBCXX_ENABLE_TIME_ZONE_DATABASE=OFF -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$(cygpath -m "$GITHUB_WORKSPACE")/libcxx18"
+          cmake --build build-ps4
+          cmake --install build-ps4
+          echo '#undef __FreeBSD__' >> "$GITHUB_WORKSPACE/libcxx18/include/c++/v1/__config_site"
+
+      # ---------- 5. OpenSSL y FFmpeg (cacheado) ----------
+      - name: Cache prefix
+        id: cache-prefix
+        uses: actions/cache@v4
+        with:
+          path: prefix
+          key: prefix-win-${{ hashFiles('tools/env-build.sh', 'tools/ps4-cc.sh') }}
+      - name: Compilar OpenSSL y FFmpeg
+        if: steps.cache-prefix.outputs.cache-hit != 'true'
+        run: |
+          source tools/env-build.sh
+          WS="$(cygpath -m "$GITHUB_WORKSPACE")"
+          mkdir -p deps && cd deps
+          curl -L -o openssl.tar.gz https://github.com/openssl/openssl/releases/download/openssl-3.6.2/openssl-3.6.2.tar.gz
+          tar xf openssl.tar.gz && cd openssl-3.6.2
+          CFLAGS="$PS4_CFLAGS" CC=clang AR=llvm-ar RANLIB=llvm-ranlib perl Configure linux-x86_64-clang \
+            no-shared no-tests no-apps no-docs no-dso no-async no-afalgeng no-engine no-ui-console \
+            no-secure-memory no-module --with-rand-seed=devrandom --prefix="$WS/prefix" --libdir=lib \
+            --openssldir=/app0/ssl
+          make -j"$(nproc)" build_libs && make install_dev
+          cd ..
+          git clone https://github.com/FFmpeg/FFmpeg.git ffmpeg
+          git -C ffmpeg checkout c7b5f1537d
+          mkdir -p build-ffmpeg && cd build-ffmpeg
+          export TMPDIR="$PWD/tmp" && mkdir -p "$TMPDIR"
+          MINGW="$HT/llvm-mingw/bin"   # TODO: ajustar a la ruta real de llvm-mingw
+          ../ffmpeg/configure --prefix="$WS/prefix" --enable-cross-compile --arch=x86_64 --target-os=freebsd \
+            --host-cc="$MINGW/x86_64-w64-mingw32-clang" --host-ld="$MINGW/x86_64-w64-mingw32-clang" \
+            --cc="bash $WS/tools/ps4-cc.sh" --ld="bash $WS/tools/ps4-cc.sh" \
+            --ar=llvm-ar --ranlib=llvm-ranlib --nm=llvm-nm --disable-x86asm --disable-autodetect \
+            --disable-everything --disable-programs --disable-doc --disable-avdevice \
+            --disable-avformat --disable-network --disable-swresample \
+            --enable-decoder='h264,vp8,vp9' --enable-filter='yadif,scale' --enable-pic \
+            --enable-pthreads --disable-shared --enable-static
+          make -j"$(nproc)" && make install
+
+      # ---------- 6. Eden y paquete ----------
+      - name: Bajar Eden y configurar
+        run: |
+          bash scripts/fetch-eden.sh
+          bash configure-eden.sh
+      - name: Compilar eden-ps4
+        run: |
+          source tools/env-build.sh && unset OO_PS4_TOOLCHAIN
+          cmake --build build-eden --target eden-ps4
+      - name: Empaquetar PKG
+        run: bash package-eden.sh
+      - name: Subir resultado
+        uses: actions/upload-artifact@v4
+        with:
+          name: nx-on-orbis-pkg
+          path: |
+            out-eden/*.pkg
+            elf/*
+          if-no-files-found: warn
