@@ -60,14 +60,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p sdk-dl/orbis-sdk-v1
-          gh release download orbis-sdk-v1 --repo orbis-ports/orbis-porting-kit --dir sdk-dl
-          ls -la sdk-dl
-          # TODO: descomprimir en sdk-dl/orbis-sdk-v1/
-          # TODO: copiar create-fself.exe, create-gp4.exe, PkgTool.Core.exe y DLLs de OpenOrbis
-          #       a sdk-dl/orbis-sdk-v1/sdk/bin/windows/
-          # TODO: en orbis-compat/cmake/ps4-openorbis.cmake agregar:
-          #   elseif(CMAKE_HOST_WIN32) set(OO_PS4_BINDIR "${OO_PS4_TOOLCHAIN}/bin/windows")
+          mkdir -p sdk-dl && cd sdk-dl
+          gh release download orbis-sdk-v1 --repo orbis-ports/orbis-porting-kit
+          ls -la
+          for f in *.tar.gz *.tgz; do [ -f "$f" ] && tar xf "$f"; done || true
+          for f in *.zip; do [ -f "$f" ] && unzip -q -o "$f"; done || true
+          # Buscar la carpeta que contiene orbis-compat y dejarla en sdk-dl/orbis-sdk-v1
+          d=$(find . -type d -name orbis-compat -print -quit)
+          root=$(dirname "$d")
+          if [ "$root" != "./orbis-sdk-v1" ]; then
+            rm -rf orbis-sdk-v1
+            mv "$root" orbis-sdk-v1
+          fi
+          ls orbis-sdk-v1
+          ls orbis-sdk-v1/orbis-compat/include | head
+          # TODO (para el paso de empaquetar, mas adelante):
+          #  - copiar create-fself.exe, create-gp4.exe, PkgTool.Core.exe y DLLs de OpenOrbis
+          #    a sdk-dl/orbis-sdk-v1/sdk/bin/windows/
+          #  - en orbis-compat/cmake/ps4-openorbis.cmake agregar:
+          #    elseif(CMAKE_HOST_WIN32) set(OO_PS4_BINDIR "${OO_PS4_TOOLCHAIN}/bin/windows")
 
       # ---------- 3. Rutas del autor -> rutas del runner ----------
       - name: Reemplazar rutas
@@ -98,7 +109,8 @@ jobs:
           cd llvm-project
           git sparse-checkout set runtimes libcxx libcxxabi libunwind cmake llvm/cmake
           grep -n "sendfile" libcxx/src/filesystem/operations.cpp | head
-          # TODO: agregar '&& !defined(__ORBIS__)' a la condicion de sendfile (~linea 40)
+          sed -i '40s|#if __has_include(<sys/sendfile.h>)|#if __has_include(<sys/sendfile.h>) \&\& !defined(__ORBIS__)|' libcxx/src/filesystem/operations.cpp
+          sed -n '38,44p' libcxx/src/filesystem/operations.cpp
           cd runtimes
           cmake -S . -B build-ps4 -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/toolchain/runtimes-ps4.cmake" \
