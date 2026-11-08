@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
  
       - name: Version del workflow
-        run: echo "WORKFLOW VERSION v3 - sdk fix + sendfile patch"
+        run: echo "WORKFLOW VERSION v4 - sparse llvm-lit"
  
       # ---------- 1. Herramientas del host ----------
       - name: LLVM 18.1.8
@@ -110,7 +110,7 @@ jobs:
           mkdir -p deps && cd deps
           git clone --depth 1 --branch llvmorg-18.1.8 --filter=blob:none --sparse https://github.com/llvm/llvm-project.git
           cd llvm-project
-          git sparse-checkout set runtimes libcxx libcxxabi libunwind cmake llvm/cmake
+          git sparse-checkout set runtimes libcxx libcxxabi libunwind cmake llvm/cmake llvm/utils/llvm-lit llvm/utils/lit third-party
           grep -n "sendfile" libcxx/src/filesystem/operations.cpp | head
           sed -i '40s|#if __has_include(<sys/sendfile.h>)|#if __has_include(<sys/sendfile.h>) \&\& !defined(__ORBIS__)|' libcxx/src/filesystem/operations.cpp
           sed -n '38,44p' libcxx/src/filesystem/operations.cpp
@@ -122,6 +122,7 @@ jobs:
             -DLIBCXX_HAS_MUSL_LIBC=ON -DLIBCXX_CXX_ABI=libcxxabi \
             -DLIBCXX_ENABLE_NEW_DELETE_DEFINITIONS=OFF -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
             -DLIBCXX_ENABLE_TIME_ZONE_DATABASE=OFF -DLIBCXX_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
             -DCMAKE_INSTALL_PREFIX="$(cygpath -m "$GITHUB_WORKSPACE")/libcxx18"
           cmake --build build-ps4
           cmake --install build-ps4
@@ -182,4 +183,3 @@ jobs:
             out-eden/*.pkg
             elf/*
           if-no-files-found: warn
- 
